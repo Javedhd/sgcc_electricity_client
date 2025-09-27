@@ -35,35 +35,65 @@ class Electricity:
         return result
 
     async def async_get_balance(self, user_id):
-        r = await self._session.get(BALANCE_URL.format(addr=self._addr, user_id=user_id), timeout=10)
-        result = []
-        if r.status == 200:
-            result = json.loads(await r.read())
-        self._data[user_id]["balance"] = result['balance']
-        self._data[user_id]["refresh_time"] = result['updateTime']
+        try:
+            r = await self._session.get(BALANCE_URL.format(addr=self._addr, user_id=user_id), timeout=10)
+            if r.status == 200:
+                result = json.loads(await r.read())
+                self._data[user_id]["balance"] = result.get('balance', 0)
+                self._data[user_id]["refresh_time"] = result.get('updateTime', 'unknown')
+            else:
+                LOGGER.warning(f"Balance API failed for {user_id}: HTTP {r.status}")
+                self._data[user_id]["balance"] = None
+                self._data[user_id]["refresh_time"] = 'unavailable'
+        except Exception as e:
+            LOGGER.error(f"Balance API error for {user_id}: {e}")
+            self._data[user_id]["balance"] = None
+            self._data[user_id]["refresh_time"] = 'error'
 
     async def async_get_dailys(self, user_id):
-        r = await self._session.get(DAILYS_URL.format(addr=self._addr, user_id=user_id), timeout=10)
-        result = []
-        if r.status == 200:
-            result = json.loads(await r.read())
-        self._data[user_id]["dailys"] = result
+        try:
+            r = await self._session.get(DAILYS_URL.format(addr=self._addr, user_id=user_id), timeout=10)
+            if r.status == 200:
+                result = json.loads(await r.read())
+                self._data[user_id]["dailys"] = result if result else []
+            else:
+                LOGGER.warning(f"Dailys API failed for {user_id}: HTTP {r.status}")
+                self._data[user_id]["dailys"] = []
+        except Exception as e:
+            LOGGER.error(f"Dailys API error for {user_id}: {e}")
+            self._data[user_id]["dailys"] = []
 
     async def async_get_latest_month(self, user_id):
-        r = await self._session.get(LATEST_MONTH_URL.format(addr=self._addr, user_id=user_id), timeout=10)
-        result = []
-        if r.status == 200:
-            result = json.loads(await r.read())
-        self._data[user_id]["last_month_ele_num"] = result["usage"]
-        self._data[user_id]["last_month_ele_cost"] = result["charge"]
+        try:
+            r = await self._session.get(LATEST_MONTH_URL.format(addr=self._addr, user_id=user_id), timeout=10)
+            if r.status == 200:
+                result = json.loads(await r.read())
+                self._data[user_id]["last_month_ele_num"] = result.get("usage", 0)
+                self._data[user_id]["last_month_ele_cost"] = result.get("charge", 0)
+            else:
+                LOGGER.warning(f"Latest month API failed for {user_id}: HTTP {r.status}")
+                self._data[user_id]["last_month_ele_num"] = None
+                self._data[user_id]["last_month_ele_cost"] = None
+        except Exception as e:
+            LOGGER.error(f"Latest month API error for {user_id}: {e}")
+            self._data[user_id]["last_month_ele_num"] = None
+            self._data[user_id]["last_month_ele_cost"] = None
     
     async def async_get_this_year(self, user_id):
-        r = await self._session.get(THIS_YEAR_URL.format(addr=self._addr, user_id=user_id), timeout=10)
-        result = []
-        if r.status == 200:
-            result = json.loads(await r.read())
-        self._data[user_id]["year_ele_num"] = result["usage"]
-        self._data[user_id]["year_ele_cost"] = result["charge"]
+        try:
+            r = await self._session.get(THIS_YEAR_URL.format(addr=self._addr, user_id=user_id), timeout=10)
+            if r.status == 200:
+                result = json.loads(await r.read())
+                self._data[user_id]["year_ele_num"] = result.get("usage", 0)
+                self._data[user_id]["year_ele_cost"] = result.get("charge", 0)
+            else:
+                LOGGER.warning(f"This year API failed for {user_id}: HTTP {r.status}")
+                self._data[user_id]["year_ele_num"] = None
+                self._data[user_id]["year_ele_cost"] = None
+        except Exception as e:
+            LOGGER.error(f"This year API error for {user_id}: {e}")
+            self._data[user_id]["year_ele_num"] = None
+            self._data[user_id]["year_ele_cost"] = None
     
     async def async_get_data(self):
         try:
@@ -72,15 +102,39 @@ class Electricity:
 
             for user_id in user_list:
                 if user_id not in self._data:
-                    self._data[user_id] = {}
-                tasks = [
-                    self.async_get_balance(user_id),
-                    self.async_get_dailys(user_id),
-                    self.async_get_latest_month(user_id),
-                    self.async_get_this_year(user_id)
-                ]
-                await asyncio.gather(*tasks)
-            LOGGER.debug(f"Data {json.dumps(self._data)}")
+                    # 初始化完整的数据结构
+                    self._data[user_id] = {
+                        "balance": None,
+                        "year_ele_num": None,
+                        "year_ele_cost": None,
+                        "last_month_ele_num": None,
+                        "last_month_ele_cost": None,
+                        "refresh_time": None,
+                        "dailys": []
+                    }
+                
+                # 分别处理每个API调用，避免一个失败影响全部
+                try:
+                    await self.async_get_balance(user_id)
+                except Exception as e:
+                    LOGGER.error(f"Failed to get balance for {user_id}: {e}")
+                    
+                try:
+                    await self.async_get_dailys(user_id)
+                except Exception as e:
+                    LOGGER.error(f"Failed to get dailys for {user_id}: {e}")
+                    
+                try:
+                    await self.async_get_latest_month(user_id)
+                except Exception as e:
+                    LOGGER.error(f"Failed to get latest month for {user_id}: {e}")
+                    
+                try:
+                    await self.async_get_this_year(user_id)
+                except Exception as e:
+                    LOGGER.error(f"Failed to get this year for {user_id}: {e}")
+                    
+            LOGGER.debug(f"Final data structure: {json.dumps(self._data)}")
             await async_save_to_store(self._hass,CONFIG_NAME,self._data)
         except Exception as err:
             traceback.print_exc()
